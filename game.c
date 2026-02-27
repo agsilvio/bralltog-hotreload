@@ -12,22 +12,49 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#define VIEW_WIDTH 1000
+#define VIEW_HEIGHT 600
+#define DESIRED_FPS 60
+#define MAX_MEDIA_PTRS 10
+
+typedef struct {
+    char * filepath;
+    SDL_Texture ** ptr;
+} ImagePointer;
+
+typedef struct {
+    char * filepath;
+    MIX_Track ** ptr;
+} SoundPointer;
+
+typedef struct {
+    char * filepath;
+    float size;
+    TTF_Font ** ptr;
+} FontPointer;
+
 typedef struct {
     Uint32 lastTime;
     int x, y;
     SDL_Window * window;
     SDL_Renderer * renderer;
+    SDL_Gamepad * gamepad;
+    bool musicMuted;
+
+    //images
     SDL_Texture * image;
-    TTF_Font * font;
+    ImagePointer imagePointers[MAX_MEDIA_PTRS];
+
+    //sounds
     MIX_Mixer * mixer;
     MIX_Track * sound;
     MIX_Track * music;
-    bool musicMuted;
-} GameContext;
+    SoundPointer soundPointers[MAX_MEDIA_PTRS];
 
-#define VIEW_WIDTH 1000
-#define VIEW_HEIGHT 600
-#define DESIRED_FPS 60
+    //fonts
+    TTF_Font * font;
+    FontPointer fontPointers[MAX_MEDIA_PTRS];
+} GameContext;
 
 SDL_Texture * loadTexture(char * path, SDL_Renderer * renderer) {
     SDL_Texture * newTexture = IMG_LoadTexture(renderer, path);
@@ -61,52 +88,91 @@ void rateLimitFps(Uint32 lastTime) {
     }
 }
 
+void initializeMediaTables(GameContext * ctx) {
+    //images
+    ctx->imagePointers[0] = (ImagePointer){ "assets/image.png", &(ctx->image) };
+    ctx->imagePointers[1] = (ImagePointer){0};
+
+    //sounds
+    ctx->soundPointers[0] = (SoundPointer){ "assets/sound.wav", &(ctx->sound) };
+    ctx->soundPointers[1] = (SoundPointer){ "assets/music.wav", &(ctx->music) };
+    ctx->soundPointers[2] = (SoundPointer){0};
+
+    //fonts
+    ctx->fontPointers[0] = (FontPointer){ "assets/font.ttf", 48.0f, &(ctx->font) };
+    ctx->fontPointers[1] = (FontPointer){0};
+}
+
+void initializeGameState(GameContext * ctx) {
+    ctx->x = 100;
+    ctx->y = 100;
+    ctx->gamepad = NULL;
+    ctx->musicMuted = true;
+}
+
+void initializeGameContext(GameContext * ctx) {
+    initializeGameState(ctx);
+    initializeMediaTables(ctx);
+}
+
 void freeAllAssets(GameContext * ctx) {
-    if (ctx->font) {
-        TTF_CloseFont(ctx->font);
-        ctx->font = NULL;
+    //images
+    int i = 0;
+    while (ctx->imagePointers[i].ptr != NULL) {
+        SDL_DestroyTexture(*ctx->imagePointers[i].ptr);
+        *ctx->imagePointers[i].ptr = NULL;
+        i++;
     }
-    if (ctx->sound) {
-        MIX_DestroyTrack(ctx->sound);
-        ctx->sound = NULL;
+
+    //sounds
+    int s = 0;
+    while (ctx->soundPointers[s].ptr != NULL) {
+        MIX_DestroyTrack(*ctx->soundPointers[s].ptr);
+        *ctx->soundPointers[s].ptr = NULL;
+        s++;
     }
-    if (ctx->music) {
-        MIX_DestroyTrack(ctx->music);
-        ctx->music = NULL;
-    }
-    if (ctx->image) {
-        SDL_DestroyTexture(ctx->image);
-        ctx->image = NULL;
+
+    //fonts
+    int f = 0;
+    while (ctx->fontPointers[f].ptr != NULL) {
+        TTF_CloseFont(*ctx->fontPointers[f].ptr);
+        *ctx->fontPointers[f].ptr = NULL;
+        f++;
     }
 }
 
-SDL_AppResult loadAllAssets(GameContext * ctx, SDL_Renderer * renderer) {
-    //load image
-    ctx->image = loadTexture("assets/image.png", renderer);
-    if (!ctx->image) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not load image. Error: %s", SDL_GetError());
-        return SDL_APP_FAILURE;
+SDL_AppResult loadAllAssets(GameContext * ctx) {
+    //load images
+    int i = 0;
+    while (ctx->imagePointers[i].ptr != NULL) {
+        *ctx->imagePointers[i].ptr = loadTexture(ctx->imagePointers[i].filepath, ctx->renderer);
+        if (!*ctx->imagePointers[i].ptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not load image. Error: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+        i++;
     }
 
-    //load sound
-    ctx->sound = loadTrack(ctx->mixer, "assets/sound.wav");
-    if (!ctx->sound) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not load sound. Error: %s", SDL_GetError());
-        return SDL_APP_FAILURE;
+    //load sounds
+    int s = 0;
+    while (ctx->soundPointers[s].ptr != NULL) {
+        *ctx->soundPointers[s].ptr = loadTrack(ctx->mixer, ctx->soundPointers[s].filepath);
+        if (!*ctx->soundPointers[s].ptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not load sound. Error: %s", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+        s++;
     }
 
-    //load music
-    ctx->music = loadTrack(ctx->mixer, "assets/music.wav");
-    if (!ctx->music) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not load music. Error: %s", SDL_GetError());
-        return SDL_APP_FAILURE;
-    }
-
-
-    ctx->font = TTF_OpenFont("assets/font.ttf", 48);
-    if (!ctx->font) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Font could not be loaded! Error: %s\n", SDL_GetError());
-        return SDL_APP_FAILURE;
+    //load fonts
+    int f = 0;
+    while (ctx->fontPointers[f].ptr != NULL) {
+        *ctx->fontPointers[f].ptr = TTF_OpenFont(ctx->fontPointers[f].filepath, ctx->fontPointers[f].size);
+        if (!*ctx->fontPointers[f].ptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Font could not be loaded! Error: %s\n", SDL_GetError());
+            return SDL_APP_FAILURE;
+        }
+        f++;
     }
 
     return SDL_APP_CONTINUE;
@@ -128,22 +194,15 @@ SDL_AppResult reloadAssetsIfNeeded(GameContext *ctx, bool reloaded) {
     
     SDL_Log("Hot reload: reloading assets...");
     freeAllAssets(ctx);
-    return loadAllAssets(ctx, ctx->renderer);
+    initializeMediaTables(ctx);
+    return loadAllAssets(ctx);
 }
 
 SDL_AppResult Core_SDL_AppInit(void **appstate, int argc, char **argv, bool reloaded)
 {
-    //this method of initialization is preferred for a couple of reasons:
-    //1. I think having everything that's not a constant in GameContext may work better 
-    //on systems like Android that really control the behaviour of your app.
-    //2. It allows for more concise initialization of the GameContext. 
-    //This is paired with the member-wise copy at the end of this function.
-    GameContext * newAppState = (GameContext *)malloc(sizeof(GameContext));
-    GameContext ctx = {
-        .x = 100,
-        .y = 100,
-	.musicMuted = true
-    };
+    GameContext * ctx = (GameContext *)malloc(sizeof(GameContext));
+
+    initializeGameContext(ctx);
 
     int result = SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD);
     if(result < 0) {
@@ -151,26 +210,25 @@ SDL_AppResult Core_SDL_AppInit(void **appstate, int argc, char **argv, bool relo
         return SDL_APP_FAILURE;
     }
 
-    //gamepad input
+    // Gamepad is optional: try to open one if available.
     int count = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
-    SDL_Gamepad* gamepad = NULL;
-
-    // Iterate over the list of gamepads
-    for(int i = 0; i < count; i++) {
-	    SDL_Gamepad* gamepd = SDL_OpenGamepad(ids[i]);
-	    if(gamepad == NULL) {
-		    gamepad = gamepd;
-	    }
-
-	    // Close the other gamepads
-	    if(i > 0) {
-		    SDL_CloseGamepad(gamepd);
-	    }
+    ctx->gamepad = NULL;
+    for (int i = 0; i < count; i++) {
+        SDL_Gamepad *opened = SDL_OpenGamepad(ids[i]);
+        if (!opened) {
+            continue;
+        }
+        if (ctx->gamepad == NULL) {
+            ctx->gamepad = opened;
+        } else {
+            SDL_CloseGamepad(opened);
+        }
     }
-    if (!gamepad) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to open gamepad. Error: %s", SDL_GetError());
-        return SDL_APP_FAILURE;
+    SDL_free(ids);
+
+    if (!ctx->gamepad) {
+        SDL_Log("No gamepad detected. Continuing with keyboard input only.");
     }
 
 
@@ -181,13 +239,13 @@ SDL_AppResult Core_SDL_AppInit(void **appstate, int argc, char **argv, bool relo
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't create window and renderer. Error: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
-    ctx.window = window;
-    ctx.renderer = renderer;
+    ctx->window = window;
+    ctx->renderer = renderer;
 
     //initialize sound
     MIX_Init();
-    ctx.mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL);
-    if (!ctx.mixer) {
+    ctx->mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL);
+    if (!ctx->mixer) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL Mixer could not be initialized! Error: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
@@ -198,16 +256,15 @@ SDL_AppResult Core_SDL_AppInit(void **appstate, int argc, char **argv, bool relo
     }
 
 
-    SDL_AppResult loadAssetsResult = loadAllAssets(&ctx, renderer);
+    SDL_AppResult loadAssetsResult = loadAllAssets(ctx);
 
     //playMusic (muted on init)
-    MIX_SetTrackGain(ctx.sound, 1.0f);
-    MIX_SetTrackGain(ctx.music, 0.0f);
-    MIX_PlayTrack(ctx.music, 0);
+    MIX_SetTrackGain(ctx->sound, 1.0f);
+    MIX_SetTrackGain(ctx->music, 0.0f);
+    MIX_PlayTrack(ctx->music, 0);
 
 
-    *newAppState = ctx;
-    *appstate = newAppState;
+    *appstate = ctx;
     return SDL_APP_CONTINUE;
 }
 
@@ -229,8 +286,7 @@ void toggleMusic(GameContext *appstate) {
 
 void handleInput(GameContext *ctx) {
     const bool* keystates = SDL_GetKeyboardState(NULL);
-
-    SDL_Gamepad *pad = SDL_GetGamepadFromPlayerIndex(0);
+    SDL_Gamepad *pad = ctx->gamepad;
 
     if (keystates[SDL_SCANCODE_UP] || (pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_UP))) {
         ctx->y -= 2;
@@ -327,6 +383,10 @@ void Core_SDL_AppQuit(void *appstate, SDL_AppResult result, bool reloaded) {
 
     if (ctx) { 
         freeAllAssets(ctx);
+        if (ctx->gamepad) {
+            SDL_CloseGamepad(ctx->gamepad);
+            ctx->gamepad = NULL;
+        }
         SDL_DestroyRenderer(ctx->renderer);
         SDL_DestroyWindow(ctx->window);
     }
